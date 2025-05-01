@@ -1,0 +1,16 @@
+name = "MathOptChordalDecomposition"
+uuid = "691ff971-50ce-4a2e-a182-eb537bf792c3"
+authors = ["Richard Samuelson <samuelson.rick@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+CliqueTrees = "60701a23-6482-424a-84db-faee86b9b1f8"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+CliqueTrees = "1.5.1"
+LinearAlgebra = "1.11.0"
+MathOptInterface = "1.39.0"
+SparseArrays = "1.11.0"
