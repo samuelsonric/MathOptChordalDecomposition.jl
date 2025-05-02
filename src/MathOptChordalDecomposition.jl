@@ -298,23 +298,11 @@ function MOI.get(
     return # ???
 end
 
-function idx(i::Int, j::Int)
-    @assert i <= j
-    x = i + j * (j - 1) ÷ 2
-    return x
-end
+# Utilities
 
-function col(x::Int)
-    j = ceil(Int, (sqrt(1 + 8x) - 1.0) / 2)
-    return j
-end
-
-function row(x::Int)
-    j = col(x)
-    i = x - j * (j - 1) ÷ 2
-    return i
-end
-
+# `(V, A, b) = decode(f, S)` satisfies
+#    f(Vᵢ) = Aᵢ + b
+# for all 1 ≤ i ≤ n.
 function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeTriangle) where {T}
     n = S.side_dimension
     index = Dict{MOI.VariableIndex, Int}()
@@ -365,10 +353,32 @@ function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeT
     return V, A, b
 end
 
+# `S = sparsitypattern(A)` is a binary matrix with the same
+# sparsity pattern as A.
 function sparsitypattern(A::AbstractMatrix{T}) where {T}
     S = sparse(Symmetric(A, :U))
     nonzeros(S) .= one(T)
     return S
+end
+
+# upper triangular indices
+# idx ∘ (row, col) = id
+# (row, col) ∘ idx = id
+function idx(i::Int, j::Int)
+    @assert i <= j
+    x = i + j * (j - 1) ÷ 2
+    return x
+end
+
+function col(x::Int)
+    j = ceil(Int, (sqrt(1 + 8x) - 1.0) / 2)
+    return j
+end
+
+function row(x::Int)
+    j = col(x)
+    i = x - j * (j - 1) ÷ 2
+    return i
 end
 
 end
