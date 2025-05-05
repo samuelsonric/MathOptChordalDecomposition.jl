@@ -309,7 +309,19 @@ function MOI.get(
     F<:MOI.VectorAffineFunction{Float64},
     S<:MOI.PositiveSemidefiniteConeTriangle,
 }
-    error()
+    index, indices, cliques, n = model.outer_to_inner[index]
+    result = zeros(Float64, n * (n + 1) ÷ 2)
+
+    for (index, clique) in zip(indices, cliques)
+        m = length(clique)
+        vector = MOI.get(model.inner, attribute, index)
+
+        for j in oneto(m), i in oneto(j)
+            result[idx(clique[i], clique[j])] = vector[idx(i, j)]
+        end
+    end
+
+    return result
 end
 
 # Utilities
