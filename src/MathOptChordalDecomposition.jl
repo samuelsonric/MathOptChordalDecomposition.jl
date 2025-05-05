@@ -8,23 +8,18 @@ using SparseArrays
 
 import MathOptInterface as MOI
 
+struct DecomposedConstraintIndex
+    neqns::Int
+    indices::Vector{Int}
+    cliques::Vector{Vector{Int}}
+end
+
 const DICT = Dict{
     MOI.ConstraintIndex{
         MOI.VectorAffineFunction{Float64},
-        MOI.PositiveSemidefiniteConeTriangle},
-    Tuple{
-        MOI.ConstraintIndex{
-            MOI.VectorAffineFunction{Float64},
-            MOI.Zeros},
-        Vector{
-            MOI.ConstraintIndex{
-                MOI.VectorOfVariables,
-                MOI.PositiveSemidefiniteConeTriangle,
-            },
-        },
-        Vector{Vector{Int}},
-        Int,
+        MOI.PositiveSemidefiniteConeTriangle,
     },
+    DecomposedConstraintIndex,
 }
 
 mutable struct Optimizer <: MOI.AbstractOptimizer
@@ -215,7 +210,7 @@ function MOI.add_constraint(
     end
     
     # terms
-    indices = MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}[]
+    indices = Int[]
     terms = MOI.VectorAffineTerm{T}[]
     
     for clique in cliques
@@ -226,8 +221,9 @@ function MOI.add_constraint(
             v = U[idx(i, j)]
             push!(terms, MOI.VectorAffineTerm(idx(clique[i], clique[j]), MOI.ScalarAffineTerm(-1.0, v)))
         end
-        
-        push!(indices, MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m)))
+ 
+        index = MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m))       
+        push!(indices, index.value)
     end
     
     for (v, a) in zip(V, A), j in axes(a, 2)
@@ -254,7 +250,7 @@ function MOI.add_constraint(
     
     index = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2))
     outer = MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(index.value)
-    model.outer_to_inner[outer] = (index, indices, cliques, n)
+    model.outer_to_inner[outer] = DecomposedConstraintIndex(n, indices, cliques)
     return outer
 end
 
@@ -286,15 +282,17 @@ function MOI.get(
     F<:MOI.VectorAffineFunction{Float64},
     S<:MOI.PositiveSemidefiniteConeTriangle,
 }
-    index, indices, cliques, n = model.outer_to_inner[index]
-    result = zeros(Float64, n * (n + 1) ÷ 2)
+    inner = model.outer_to_inner[index]
+    result = zeros(Float64, inner.neqns * (inner.neqns + 1) ÷ 2)
 
-    for (index, clique) in zip(indices, cliques)
-        m = length(clique)
-        vector = MOI.get(model.inner, attribute, index)
+    for (value, clique) in zip(inner.indices, inner.cliques)
+        vector = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
 
-        for j in oneto(m), i in oneto(j)
-            result[idx(clique[i], clique[j])] += vector[idx(i, j)]
+        for (j, w) in enumerate(clique)
+            for (i, v) in enumerate(clique)
+                i > j && break
+                result[idx(v, w)] += vector[idx(i, j)]
+            end
         end
     end
 
@@ -309,15 +307,17 @@ function MOI.get(
     F<:MOI.VectorAffineFunction{Float64},
     S<:MOI.PositiveSemidefiniteConeTriangle,
 }
-    index, indices, cliques, n = model.outer_to_inner[index]
-    result = zeros(Float64, n * (n + 1) ÷ 2)
+    inner = model.outer_to_inner[index]
+    result = zeros(Float64, inner.neqns * (inner.neqns + 1) ÷ 2)
 
-    for (index, clique) in zip(indices, cliques)
-        m = length(clique)
-        vector = MOI.get(model.inner, attribute, index)
+    for (value, clique) in zip(inner.indices, inner.cliques)
+        vector = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
 
-        for j in oneto(m), i in oneto(j)
-            result[idx(clique[i], clique[j])] = vector[idx(i, j)]
+        for (j, w) in enumerate(clique)
+            for (i, v) in enumerate(clique)
+                i > j && break
+                result[idx(v, w)] = vector[idx(i, j)]
+            end
         end
     end
 
