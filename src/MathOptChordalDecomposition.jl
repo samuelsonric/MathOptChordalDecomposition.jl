@@ -8,34 +8,32 @@ using SparseArrays
 
 import MathOptInterface as MOI
 
-struct DecomposedConstraintIndex
+struct Decomposition
     neqns::Int
-    indices::Vector{Int}
+    values::Vector{Int}
     cliques::Vector{Vector{Int}}
 end
 
-const DICT = Dict{
-    MOI.ConstraintIndex{
-        MOI.VectorAffineFunction{Float64},
-        MOI.PositiveSemidefiniteConeTriangle,
-    },
-    DecomposedConstraintIndex,
-}
-
-mutable struct Optimizer <: MOI.AbstractOptimizer
+mutable struct Optimizer{A <: EliminationAlgorithm} <: MOI.AbstractOptimizer
     inner::MOI.AbstractOptimizer
-    outer_to_inner::DICT
+    outer_to_inner::Dict{Int, Decomposition}
+    alg::A
 
-    function Optimizer(optimizer_factory)
-        return new(
+    function Optimizer(optimizer_factory, alg::A) where {A <: EliminationAlgorithm}
+        return new{A}(
             MOI.instantiate(
                 optimizer_factory;
                 with_cache_type = Float64,
                 with_bridge_type = Float64,
             ),
-            DICT(),
+            Dict{Int, Decomposition}(),
+            alg,
         )
     end
+end
+
+function Optimizer(optimizer_factory; alg::EliminationAlgorithm = MF())
+    return Optimizer(optimizer_factory, alg)
 end
 
 function MOI.empty!(model::Optimizer)
@@ -47,13 +45,17 @@ function MOI.is_empty(model::Optimizer)
     return MOI.is_empty(model.inner)
 end
 
-MOI.supports_incremental_interface(::Optimizer) = true
+function MOI.supports_incremental_interface(::Optimizer)
+    return true
+end
 
 function MOI.copy_to(dest::Optimizer, src::MOI.ModelLike)
     return MOI.Utilities.default_copy_to(dest, src)
 end
 
-MOI.optimize!(model::Optimizer) = MOI.optimize!(model.inner)
+function MOI.optimize!(model::Optimizer)
+    return MOI.optimize!(model.inner)
+end
 
 const _ATTRIBUTES = Union{
     MOI.AbstractConstraintAttribute,
@@ -68,18 +70,24 @@ function MOI.set(model::Optimizer, attr::_ATTRIBUTES, args...)
 end
 
 function MOI.get(model::Optimizer, attr::_ATTRIBUTES, args...)
+    #=
     if MOI.is_set_by_optimize(attr)
         msg = "MOCD does not support querying this attribute."
         throw(MOI.GetAttributeNotAllowed(attr, msg))
     end
+    =#
+
     return MOI.get(model.inner, attr, args...)
 end
 
 function MOI.get(model::Optimizer, attr::_ATTRIBUTES, arg::Vector{T}) where {T}
+    #=
     if MOI.is_set_by_optimize(attr)
         msg = "MOCD does not support querying this attribute."
         throw(MOI.GetAttributeNotAllowed(attr, msg))
     end
+    =#
+
     return MOI.get.(model, attr, arg)
 end
 
@@ -110,7 +118,9 @@ function MOI.is_valid(model::Optimizer, x::MOI.VariableIndex)
     return MOI.is_valid(model.inner, x)
 end
 
-MOI.add_variable(model::Optimizer) = MOI.add_variable(model.inner)
+function MOI.add_variable(model::Optimizer)
+    return MOI.add_variable(model.inner)
+end
 
 function MOI.delete(model::Optimizer, x::MOI.VariableIndex)
     MOI.delete(model.inner, x)
@@ -118,19 +128,19 @@ function MOI.delete(model::Optimizer, x::MOI.VariableIndex)
 end
 
 function MOI.supports(
-    model::Optimizer,
-    arg::MOI.AbstractVariableAttribute,
-    ::Type{MOI.VariableIndex},
-)
+        model::Optimizer,
+        arg::MOI.AbstractVariableAttribute,
+        ::Type{MOI.VariableIndex},
+    )
     return MOI.supports(model.inner, arg, MOI.VariableIndex)
 end
 
 function MOI.set(
-    model::Optimizer,
-    attr::MOI.AbstractVariableAttribute,
-    indices::Vector{<:MOI.VariableIndex},
-    args::Vector{T},
-) where {T}
+        model::Optimizer,
+        attr::MOI.AbstractVariableAttribute,
+        indices::Vector{<:MOI.VariableIndex},
+        args::Vector{T},
+    ) where {T}
     MOI.set.(model, attr, indices, args)
     return
 end
@@ -142,19 +152,19 @@ function MOI.is_valid(model::Optimizer, ci::MOI.ConstraintIndex)
 end
 
 function MOI.supports(
-    model::Optimizer,
-    arg::MOI.AbstractConstraintAttribute,
-    ::Type{MOI.ConstraintIndex{F,S}},
-) where {F<:MOI.AbstractFunction,S<:MOI.AbstractSet}
-    return MOI.supports(model.inner, arg, MOI.ConstraintIndex{F,S})
+        model::Optimizer,
+        arg::MOI.AbstractConstraintAttribute,
+        ::Type{MOI.ConstraintIndex{F, S}},
+    ) where {F <: MOI.AbstractFunction, S <: MOI.AbstractSet}
+    return MOI.supports(model.inner, arg, MOI.ConstraintIndex{F, S})
 end
 
 function MOI.set(
-    model::Optimizer,
-    attr::MOI.AbstractConstraintAttribute,
-    indices::Vector{<:MOI.ConstraintIndex},
-    args::Vector{T},
-) where {T}
+        model::Optimizer,
+        attr::MOI.AbstractConstraintAttribute,
+        indices::Vector{<:MOI.ConstraintIndex},
+        args::Vector{T},
+    ) where {T}
     MOI.set.(model, attr, indices, args)
     return
 end
@@ -173,59 +183,59 @@ function MOI.delete(model::Optimizer, ci::MOI.ConstraintIndex)
 end
 
 function MOI.supports_constraint(
-    model::Optimizer,
-    F::Type{<:MOI.AbstractFunction},
-    S::Type{<:MOI.AbstractSet},
-)
+        model::Optimizer,
+        F::Type{<:MOI.AbstractFunction},
+        S::Type{<:MOI.AbstractSet},
+    )
     return MOI.supports_constraint(model.inner, F, S)
 end
 
 function MOI.add_constraint(
-    model::Optimizer,
-    f::MOI.AbstractFunction,
-    s::MOI.AbstractSet,
-)
+        model::Optimizer,
+        f::MOI.AbstractFunction,
+        s::MOI.AbstractSet,
+    )
     return MOI.add_constraint(model.inner, f, s)
 end
 
 # Decomposition
 
 function MOI.add_constraint(
-    model::Optimizer,
-    f::MOI.VectorAffineFunction{T},
-    s::MOI.PositiveSemidefiniteConeTriangle,
-) where {T}
+        model::Optimizer,
+        f::MOI.VectorAffineFunction{T},
+        s::MOI.PositiveSemidefiniteConeTriangle,
+    ) where {T}
     # construct sparse matrices
     V, A, b = decode(f, s)
-    
+
     # compute aggregate sparsity pattern
-    pattern = sum(sparsitypattern, A; init=sparsitypattern(b))
-    
+    pattern = sum(sparsitypattern, A; init = sparsitypattern(b))
+
     # compute tree decomposition
-    label, tree = cliquetree(pattern; alg=MF())
-    
+    label, tree = cliquetree(pattern; alg = model.alg)
+
     # compute cliques
     cliques = map(tree) do clique
         return sort!(label[clique])
     end
-    
+
     # terms
     indices = Int[]
     terms = MOI.VectorAffineTerm{T}[]
-    
+
     for clique in cliques
         m = length(clique)
         U = MOI.add_variables(model, m * (m + 1) ÷ 2)
-        
+
         for j in oneto(m), i in oneto(j)
             v = U[idx(i, j)]
             push!(terms, MOI.VectorAffineTerm(idx(clique[i], clique[j]), MOI.ScalarAffineTerm(-1.0, v)))
         end
- 
-        index = MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m))       
+
+        index = MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m))
         push!(indices, index.value)
     end
-    
+
     for (v, a) in zip(V, A), j in axes(a, 2)
         for p in nzrange(a, j)
             i = rowvals(a)[p]
@@ -234,11 +244,11 @@ function MOI.add_constraint(
             push!(terms, MOI.VectorAffineTerm(idx(i, j), MOI.ScalarAffineTerm(x, v)))
         end
     end
-    
+
     # constants
     n = size(b, 2)
     constants = zeros(T, n * (n + 1) ÷ 2)
-    
+
     for j in axes(b, 2)
         for p in nzrange(b, j)
             i = rowvals(b)[p]
@@ -247,51 +257,53 @@ function MOI.add_constraint(
             constants[idx(i, j)] = x
         end
     end
-    
-    index = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2))
-    outer = MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(index.value)
-    model.outer_to_inner[outer] = DecomposedConstraintIndex(n, indices, cliques)
-    return outer
+
+    value = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2)).value
+    model.outer_to_inner[value] = Decomposition(n, indices, cliques)
+    return MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(value)
 end
 
 function MOI.get(
-    model::Optimizer,
-    ::MOI.NumberOfConstraints{F,S},
-) where {
-    F<:MOI.VectorAffineFunction{Float64},
-    S<:MOI.PositiveSemidefiniteConeTriangle,
-}
+        model::Optimizer,
+        ::MOI.NumberOfConstraints{F, S},
+    ) where {
+        F <: MOI.VectorAffineFunction{Float64},
+        S <: MOI.PositiveSemidefiniteConeTriangle,
+    }
     return length(model.outer_to_inner)
 end
 
 function MOI.get(
-    model::Optimizer,
-    ::MOI.ListOfConstraintIndices{F,S},
-) where {
-    F<:MOI.VectorAffineFunction{Float64},
-    S<:MOI.PositiveSemidefiniteConeTriangle,
-}
-    return sort!(collect(keys(model.outer_to_inner)); by = c -> c.value)
+        model::Optimizer,
+        ::MOI.ListOfConstraintIndices{F, S},
+    ) where {
+        F <: MOI.VectorAffineFunction{Float64},
+        S <: MOI.PositiveSemidefiniteConeTriangle,
+    }
+
+    indices = map(MOI.ConstraintIndex{F, S}, keys(model.outer_to_inner))
+    sort!(indices; by = index -> index.value)
+    return indices
 end
 
 function MOI.get(
-    model::Optimizer,
-    attribute::MOI.ConstraintPrimal,
-    index::MOI.ConstraintIndex{F,S},
-) where {
-    F<:MOI.VectorAffineFunction{Float64},
-    S<:MOI.PositiveSemidefiniteConeTriangle,
-}
-    inner = model.outer_to_inner[index]
-    result = zeros(Float64, inner.neqns * (inner.neqns + 1) ÷ 2)
+        model::Optimizer,
+        attribute::MOI.ConstraintPrimal,
+        index::MOI.ConstraintIndex{F, S},
+    ) where {
+        F <: MOI.VectorAffineFunction{Float64},
+        S <: MOI.PositiveSemidefiniteConeTriangle,
+    }
+    decomposition = model.outer_to_inner[index.value]
+    result = zeros(Float64, decomposition.neqns * (decomposition.neqns + 1) ÷ 2)
 
-    for (value, clique) in zip(inner.indices, inner.cliques)
-        vector = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
+    for (value, clique) in zip(decomposition.values, decomposition.cliques)
+        part = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
 
         for (j, w) in enumerate(clique)
             for (i, v) in enumerate(clique)
                 i > j && break
-                result[idx(v, w)] += vector[idx(i, j)]
+                result[idx(v, w)] += part[idx(i, j)]
             end
         end
     end
@@ -300,23 +312,23 @@ function MOI.get(
 end
 
 function MOI.get(
-    model::Optimizer,
-    attribute::MOI.ConstraintDual,
-    index::MOI.ConstraintIndex{F,S},
-) where {
-    F<:MOI.VectorAffineFunction{Float64},
-    S<:MOI.PositiveSemidefiniteConeTriangle,
-}
-    inner = model.outer_to_inner[index]
-    result = zeros(Float64, inner.neqns * (inner.neqns + 1) ÷ 2)
+        model::Optimizer,
+        attribute::MOI.ConstraintDual,
+        index::MOI.ConstraintIndex{F, S},
+    ) where {
+        F <: MOI.VectorAffineFunction{Float64},
+        S <: MOI.PositiveSemidefiniteConeTriangle,
+    }
+    decomposition = model.outer_to_inner[index.value]
+    result = zeros(Float64, decomposition.neqns * (decomposition.neqns + 1) ÷ 2)
 
-    for (value, clique) in zip(inner.indices, inner.cliques)
-        vector = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
+    for (value, clique) in zip(decomposition.values, decomposition.cliques)
+        part = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
 
         for (j, w) in enumerate(clique)
             for (i, v) in enumerate(clique)
                 i > j && break
-                result[idx(v, w)] = vector[idx(i, j)]
+                result[idx(v, w)] = part[idx(i, j)]
             end
         end
     end
@@ -332,18 +344,18 @@ end
 function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeTriangle) where {T}
     n = S.side_dimension
     index = Dict{MOI.VariableIndex, Int}()
-    
+
     # V, A
     V = MOI.VariableIndex[]
     AI = Vector{Int}[]
     AJ = Vector{Int}[]
     AX = Vector{T}[]
-    
+
     for term in f.terms
         i = term.output_index
         v = term.scalar_term.variable
         x = term.scalar_term.coefficient
-        
+
         if !haskey(index, v)
             push!(V, v)
             push!(AI, Int[])
@@ -351,22 +363,22 @@ function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeT
             push!(AX, T[])
             index[v] = length(V)
         end
-            
+
         j = index[v]
         push!(AI[j], row(i))
         push!(AJ[j], col(i))
         push!(AX[j], x)
     end
-    
+
     A = map(zip(AI, AJ, AX)) do (I, J, X)
         return sparse(I, J, X, n, n)
     end
-    
+
     # b
     I = Int[]
     J = Int[]
     X = T[]
-    
+
     for (i, x) in enumerate(f.constants)
         if !iszero(x)
             push!(I, row(i))
@@ -374,7 +386,7 @@ function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeT
             push!(X, x)
         end
     end
-    
+
     b = sparse(I, J, X, n, n)
     return V, A, b
 end
