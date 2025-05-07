@@ -3,7 +3,7 @@ using LinearAlgebra
 using JuMP
 using Test
 
-import MathOptChordalDecomposition
+import MathOptChordalDecomposition as MOCD
 import Mosek
 import MosekTools
 
@@ -25,29 +25,29 @@ function construct_model(f, name::String)
 end
 
 model = construct_model("mcp124-1") do
-    MathOptChordalDecomposition.Optimizer(Mosek.Optimizer)
+    MOCD.Optimizer(Mosek.Optimizer)
 end
 
 JuMP.optimize!(model)
-@test round(MOI.get(model.moi_backend.optimizer.model.inner, MOI.ObjectiveValue()); digits = 2) == 141.99
+@test round(objective_value(model); digits = 2) == 141.99
 
 model = construct_model("mcp124-2") do
-    MathOptChordalDecomposition.Optimizer(Mosek.Optimizer)
+    MOCD.Optimizer(Mosek.Optimizer)
 end
 
 JuMP.optimize!(model)
-@test round(MOI.get(model.moi_backend.optimizer.model.inner, MOI.ObjectiveValue()); digits = 2) == 269.88
+@test round(objective_value(model); digits = 2) == 269.88
 
 model = construct_model("mcp124-3") do
-    MathOptChordalDecomposition.Optimizer(Mosek.Optimizer)
+    MOCD.Optimizer(Mosek.Optimizer)
 end
 
 JuMP.optimize!(model)
-@test round(MOI.get(model.moi_backend.optimizer.model.inner, MOI.ObjectiveValue()); digits = 2) == 467.75
+@test round(objective_value(model); digits = 2) == 467.75
 
 model = construct_model("mcp124-4") do
-    MathOptChordalDecomposition.Optimizer(Mosek.Optimizer)
+    MOCD.Optimizer(Mosek.Optimizer)
 end
 
 JuMP.optimize!(model)
-@test round(MOI.get(model.moi_backend.optimizer.model.inner, MOI.ObjectiveValue()); digits = 2) == 864.41
+@test round(objective_value(model); digits = 2) == 864.41
