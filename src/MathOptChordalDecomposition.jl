@@ -11,7 +11,7 @@ import MathOptInterface as MOI
 struct Decomposition
     neqns::Int
     values::Vector{Int}
-    cliques::Vector{Vector{Int}}
+    cliques::SparseMatrixCSC{Bool, Int}
 end
 
 mutable struct Optimizer{A <: EliminationAlgorithm} <: MOI.AbstractOptimizer
@@ -206,7 +206,7 @@ function MOI.add_constraint(
         s::MOI.PositiveSemidefiniteConeTriangle,
     ) where {T}
     # construct sparse matrices
-    V, A, b = decode(f, s)
+    V, A, b = decode(f, s); n = size(b, 2)
 
     # compute aggregate sparsity pattern
     pattern = sum(sparsitypattern, A; init = sparsitypattern(b))
@@ -215,16 +215,22 @@ function MOI.add_constraint(
     label, tree = cliquetree(pattern; alg = model.alg)
 
     # compute cliques
-    cliques = map(tree) do clique
-        return sort!(label[clique])
-    end
+    cliques = spzeros(Bool, n, length(tree))
+
+    for (b, bag) in enumerate(tree)
+        append!(cliques.rowval, bag)
+        cliques.colptr[b + 1] = cliques.colptr[b] + length(bag)
+    end    
+
+    resize!(cliques.nzval, length(cliques.rowval))
+    permute!(cliques, invperm(label), axes(cliques, 2))
 
     # terms
     indices = Int[]
     terms = MOI.VectorAffineTerm{T}[]
 
-    for clique in cliques
-        m = length(clique)
+    for b in axes(cliques, 2)
+        clique = view(cliques.rowval, nzrange(cliques, b)); m = length(clique)
         U = MOI.add_variables(model, m * (m + 1) ÷ 2)
 
         for j in oneto(m), i in oneto(j)
@@ -246,7 +252,6 @@ function MOI.add_constraint(
     end
 
     # constants
-    n = size(b, 2)
     constants = zeros(T, n * (n + 1) ÷ 2)
 
     for j in axes(b, 2)
@@ -294,11 +299,22 @@ function MOI.get(
         F <: MOI.VectorAffineFunction{Float64},
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
-    decomposition = model.outer_to_inner[index.value]
-    result = zeros(Float64, decomposition.neqns * (decomposition.neqns + 1) ÷ 2)
 
-    for (value, clique) in zip(decomposition.values, decomposition.cliques)
-        part = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
+    decomposition = model.outer_to_inner[index.value]
+    neqns = decomposition.neqns
+    values = decomposition.values
+    cliques = decomposition.cliques
+    result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
+
+    for b in axes(cliques, 2)
+        clique = view(cliques.rowval, nzrange(cliques, b))
+        value = values[b]
+
+        part = MOI.get(
+            model.inner,
+            attribute,
+            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value),
+        )
 
         for (j, w) in enumerate(clique)
             for (i, v) in enumerate(clique)
@@ -320,10 +336,20 @@ function MOI.get(
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
     decomposition = model.outer_to_inner[index.value]
-    result = zeros(Float64, decomposition.neqns * (decomposition.neqns + 1) ÷ 2)
+    neqns = decomposition.neqns
+    values = decomposition.values
+    cliques = decomposition.cliques
+    result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
 
-    for (value, clique) in zip(decomposition.values, decomposition.cliques)
-        part = MOI.get(model.inner, attribute, MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value))
+    for b in axes(cliques, 2)
+        clique = view(cliques.rowval, nzrange(cliques, b))
+        value = values[b]
+
+        part = MOI.get(
+            model.inner,
+            attribute,
+            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value),
+        )
 
         for (j, w) in enumerate(clique)
             for (i, v) in enumerate(clique)
