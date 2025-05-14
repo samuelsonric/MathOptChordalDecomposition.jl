@@ -13,7 +13,7 @@ struct Decomposition
     neqns::Int
     value::Vector{Int}
     label::Vector{Int}
-    tree::CliqueTree{Int, Int}
+    tree::CliqueTree{Int,Int}
 end
 
 """
@@ -29,19 +29,22 @@ The elimination algorithm `alg` is used to compute the decomposition, and the op
   - `inner`: inner optimizer
   - `alg`: elimination algorithm
 """
-mutable struct Optimizer{A <: EliminationAlgorithm} <: MOI.AbstractOptimizer
+mutable struct Optimizer{A<:EliminationAlgorithm} <: MOI.AbstractOptimizer
     inner::MOI.AbstractOptimizer
-    outer_to_inner::Dict{Int, Decomposition}
+    outer_to_inner::Dict{Int,Decomposition}
     alg::A
 
-    function Optimizer(optimizer_factory, alg::A) where {A <: EliminationAlgorithm}
+    function Optimizer(
+        optimizer_factory,
+        alg::A,
+    ) where {A<:EliminationAlgorithm}
         return new{A}(
             MOI.instantiate(
                 optimizer_factory;
                 with_cache_type = Float64,
                 with_bridge_type = Float64,
             ),
-            Dict{Int, Decomposition}(),
+            Dict{Int,Decomposition}(),
             alg,
         )
     end
@@ -149,19 +152,19 @@ function MOI.delete(model::Optimizer, x::MOI.VariableIndex)
 end
 
 function MOI.supports(
-        model::Optimizer,
-        arg::MOI.AbstractVariableAttribute,
-        ::Type{MOI.VariableIndex},
-    )
+    model::Optimizer,
+    arg::MOI.AbstractVariableAttribute,
+    ::Type{MOI.VariableIndex},
+)
     return MOI.supports(model.inner, arg, MOI.VariableIndex)
 end
 
 function MOI.set(
-        model::Optimizer,
-        attr::MOI.AbstractVariableAttribute,
-        indices::Vector{<:MOI.VariableIndex},
-        args::Vector{T},
-    ) where {T}
+    model::Optimizer,
+    attr::MOI.AbstractVariableAttribute,
+    indices::Vector{<:MOI.VariableIndex},
+    args::Vector{T},
+) where {T}
     MOI.set.(model, attr, indices, args)
     return
 end
@@ -175,19 +178,19 @@ function MOI.is_valid(model::Optimizer, ci::MOI.ConstraintIndex)
 end
 
 function MOI.supports(
-        model::Optimizer,
-        arg::MOI.AbstractConstraintAttribute,
-        ::Type{MOI.ConstraintIndex{F, S}},
-    ) where {F <: MOI.AbstractFunction, S <: MOI.AbstractSet}
-    return MOI.supports(model.inner, arg, MOI.ConstraintIndex{F, S})
+    model::Optimizer,
+    arg::MOI.AbstractConstraintAttribute,
+    ::Type{MOI.ConstraintIndex{F,S}},
+) where {F<:MOI.AbstractFunction,S<:MOI.AbstractSet}
+    return MOI.supports(model.inner, arg, MOI.ConstraintIndex{F,S})
 end
 
 function MOI.set(
-        model::Optimizer,
-        attr::MOI.AbstractConstraintAttribute,
-        indices::Vector{<:MOI.ConstraintIndex},
-        args::Vector{T},
-    ) where {T}
+    model::Optimizer,
+    attr::MOI.AbstractConstraintAttribute,
+    indices::Vector{<:MOI.ConstraintIndex},
+    args::Vector{T},
+) where {T}
     MOI.set.(model, attr, indices, args)
     return
 end
@@ -206,18 +209,18 @@ function MOI.delete(model::Optimizer, ci::MOI.ConstraintIndex)
 end
 
 function MOI.supports_constraint(
-        model::Optimizer,
-        F::Type{<:MOI.AbstractFunction},
-        S::Type{<:MOI.AbstractSet},
-    )
+    model::Optimizer,
+    F::Type{<:MOI.AbstractFunction},
+    S::Type{<:MOI.AbstractSet},
+)
     return MOI.supports_constraint(model.inner, F, S)
 end
 
 function MOI.add_constraint(
-        model::Optimizer,
-        f::MOI.AbstractFunction,
-        s::MOI.AbstractSet,
-    )
+    model::Optimizer,
+    f::MOI.AbstractFunction,
+    s::MOI.AbstractSet,
+)
     return MOI.add_constraint(model.inner, f, s)
 end
 
@@ -226,12 +229,13 @@ end
 #################
 
 function MOI.add_constraint(
-        model::Optimizer,
-        f::MOI.VectorAffineFunction{T},
-        s::MOI.PositiveSemidefiniteConeTriangle,
-    ) where {T}
+    model::Optimizer,
+    f::MOI.VectorAffineFunction{T},
+    s::MOI.PositiveSemidefiniteConeTriangle,
+) where {T}
     # construct sparse matrices
-    V, A, b = decode(f, s); n = size(b, 2)
+    V, A, b = decode(f, s);
+    n = size(b, 2)
 
     # compute aggregate sparsity pattern
     pattern = sum(sparsitypattern, A; init = sparsitypattern(b))
@@ -251,10 +255,20 @@ function MOI.add_constraint(
             v = U[idx(i, j)]
             ii = label[bag[i]]
             jj = label[bag[j]]
-            push!(terms, MOI.VectorAffineTerm(idx(ii, jj), MOI.ScalarAffineTerm(-1.0, v)))
+            push!(
+                terms,
+                MOI.VectorAffineTerm(
+                    idx(ii, jj),
+                    MOI.ScalarAffineTerm(-1.0, v),
+                ),
+            )
         end
 
-        index = MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m))
+        index = MOI.add_constraint(
+            model.inner,
+            MOI.VectorOfVariables(U),
+            MOI.PositiveSemidefiniteConeTriangle(m),
+        )
         push!(value, index.value)
     end
 
@@ -263,7 +277,10 @@ function MOI.add_constraint(
             i = rowvals(a)[p]
             i > j && break
             x = nonzeros(a)[p]
-            push!(terms, MOI.VectorAffineTerm(idx(i, j), MOI.ScalarAffineTerm(x, v)))
+            push!(
+                terms,
+                MOI.VectorAffineTerm(idx(i, j), MOI.ScalarAffineTerm(x, v)),
+            )
         end
     end
 
@@ -279,44 +296,45 @@ function MOI.add_constraint(
         end
     end
 
-    i = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2)).value
+    i = MOI.add_constraint(
+        model.inner,
+        MOI.VectorAffineFunction(terms, constants),
+        MOI.Zeros(n * (n + 1) ÷ 2),
+    ).value
     model.outer_to_inner[i] = Decomposition(n, value, label, tree)
-    return MOI.ConstraintIndex{MOI.VectorAffineFunction{T}, MOI.PositiveSemidefiniteConeTriangle}(i)
+    return MOI.ConstraintIndex{
+        MOI.VectorAffineFunction{T},
+        MOI.PositiveSemidefiniteConeTriangle,
+    }(
+        i,
+    )
 end
 
 function MOI.get(
-        model::Optimizer,
-        ::MOI.NumberOfConstraints{F, S},
-    ) where {
-        F <: MOI.VectorAffineFunction,
-        S <: MOI.PositiveSemidefiniteConeTriangle,
-    }
+    model::Optimizer,
+    ::MOI.NumberOfConstraints{F,S},
+) where {F<:MOI.VectorAffineFunction,S<:MOI.PositiveSemidefiniteConeTriangle}
     return length(model.outer_to_inner)
 end
 
 function MOI.get(
-        model::Optimizer,
-        ::MOI.ListOfConstraintIndices{F, S},
-    ) where {
-        F <: MOI.VectorAffineFunction,
-        S <: MOI.PositiveSemidefiniteConeTriangle,
-    }
-
-    indices = map(MOI.ConstraintIndex{F, S}, keys(model.outer_to_inner))
+    model::Optimizer,
+    ::MOI.ListOfConstraintIndices{F,S},
+) where {F<:MOI.VectorAffineFunction,S<:MOI.PositiveSemidefiniteConeTriangle}
+    indices = map(MOI.ConstraintIndex{F,S}, keys(model.outer_to_inner))
     sort!(indices; by = index -> index.value)
     return indices
 end
 
 function MOI.get(
-        model::Optimizer,
-        attribute::MOI.ConstraintPrimal,
-        index::MOI.ConstraintIndex{F, S},
-    ) where {
-        T,
-        F <: MOI.VectorAffineFunction{T},
-        S <: MOI.PositiveSemidefiniteConeTriangle,
-    }
-
+    model::Optimizer,
+    attribute::MOI.ConstraintPrimal,
+    index::MOI.ConstraintIndex{F,S},
+) where {
+    T,
+    F<:MOI.VectorAffineFunction{T},
+    S<:MOI.PositiveSemidefiniteConeTriangle,
+}
     decomposition = model.outer_to_inner[index.value]
     neqns = decomposition.neqns
     value = decomposition.value
@@ -330,7 +348,12 @@ function MOI.get(
         part = MOI.get(
             model.inner,
             attribute,
-            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(k),
+            MOI.ConstraintIndex{
+                MOI.VectorOfVariables,
+                MOI.PositiveSemidefiniteConeTriangle,
+            }(
+                k,
+            ),
         )
 
         for j in oneto(m), i in oneto(j)
@@ -344,15 +367,14 @@ function MOI.get(
 end
 
 function MOI.get(
-        model::Optimizer,
-        attribute::MOI.ConstraintDual,
-        index::MOI.ConstraintIndex{F, S},
-    ) where {
-        T,
-        F <: MOI.VectorAffineFunction{T},
-        S <: MOI.PositiveSemidefiniteConeTriangle,
-    }
-
+    model::Optimizer,
+    attribute::MOI.ConstraintDual,
+    index::MOI.ConstraintIndex{F,S},
+) where {
+    T,
+    F<:MOI.VectorAffineFunction{T},
+    S<:MOI.PositiveSemidefiniteConeTriangle,
+}
     decomposition = model.outer_to_inner[index.value]
     neqns = decomposition.neqns
     value = decomposition.value
@@ -367,7 +389,12 @@ function MOI.get(
         part = MOI.get(
             model.inner,
             attribute,
-            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(k),
+            MOI.ConstraintIndex{
+                MOI.VectorOfVariables,
+                MOI.PositiveSemidefiniteConeTriangle,
+            }(
+                k,
+            ),
         )
 
         for j in oneto(m), i in oneto(m)
@@ -395,9 +422,12 @@ end
 # `(V, A, b) = decode(f, S)` satisfies
 #    f(Vᵢ) = Aᵢ + b
 # for all 1 ≤ i ≤ n.
-function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeTriangle) where {T}
+function decode(
+    f::MOI.VectorAffineFunction{T},
+    S::MOI.PositiveSemidefiniteConeTriangle,
+) where {T}
     n = S.side_dimension
-    index = Dict{MOI.VariableIndex, Int}()
+    index = Dict{MOI.VariableIndex,Int}()
 
     # V, A
     V = MOI.VariableIndex[]
@@ -449,7 +479,7 @@ end
 # Vandenberghe and Andersen
 # Algorithm 10.2: Positive semidefinite completion
 function complete!(W::Matrix, tree::CliqueTree)
-    n = nv(FilledGraph(tree))
+    n = size(W, 2)
     η = sizehint!(Int[], n)
     marker = zeros(Int, n)
 
@@ -458,7 +488,7 @@ function complete!(W::Matrix, tree::CliqueTree)
         ν = residual(tree, bag)
         marker[α] .= bag
 
-        for i in (last(ν) + 1):n
+        for i in (last(ν)+1):n
             marker[i] == bag || push!(η, i)
         end
 
@@ -485,24 +515,32 @@ end
 # upper triangular indices
 # idx ∘ (row, col) = id
 # (row, col) ∘ idx = id
-function idx(i::Int, j::Int)
+function idx(i::I, j::I) where {I}
     if i > j
         i, j = j, i
     end
 
-    x = i + j * (j - 1) ÷ 2
+    x = i + half(j * (j - one(I)))
     return x
 end
 
-function col(x::Int)
-    j = ceil(Int, (sqrt(1 + 8x) - 1.0) / 2)
+function col(x::I) where {I}
+    j = ceil(I, (sqrt(1.0 + 8.0x) - 1.0) / 2.0)
     return j
 end
 
-function row(x::Int)
+function row(x::I) where {I}
     j = col(x)
-    i = x - j * (j - 1) ÷ 2
+    i = x - half(j * (j - one(I)))
     return i
+end
+
+function half(i::I) where {I}
+    return i ÷ two(I)
+end
+
+function two(::Type{I}) where {I}
+    return one(I) + one(I)
 end
 
 end
