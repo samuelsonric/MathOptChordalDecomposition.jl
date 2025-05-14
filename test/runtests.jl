@@ -20,34 +20,22 @@ function construct_model(f, name::String)
     set_silent(model)
     @variable(model, x[1:m])
     @objective(model, Min, c' * x)
-    @constraint(model, con1, Symmetric(-Matrix(F[1]) + sum(Matrix(F[k + 1]) .* x[k] for k in 1:m)) in JuMP.PSDCone())
-    return model
+    @constraint(model, con, Symmetric(-Matrix(F[1]) + sum(Matrix(F[k + 1]) .* x[k] for k in 1:m)) in JuMP.PSDCone())
+    return model, con
 end
 
-model = construct_model("mcp124-1") do
-    MOCD.Optimizer(Mosek.Optimizer)
+for name in ("mcp124-1", "mcp124-2", "mcp124-3", "mcp124-4")
+    old, oldcon = construct_model(Mosek.Optimizer, name)
+    new, newcon = construct_model(() -> MOCD.Optimizer(Mosek.Optimizer), name)
+
+    JuMP.optimize!(old)
+    JuMP.optimize!(new)
+
+    # primal
+    @test -0.005 < objective_value(old) - objective_value(new) < 0.005
+    @test -0.005 < norm(value(oldcon) - value(newcon)) < 0.005
+
+    # dual
+    @test -0.005 < dual_objective_value(old) - dual_objective_value(new) < 0.005
+    @test -0.005 < norm(dual(oldcon) - dual(newcon)) < 0.005
 end
-
-JuMP.optimize!(model)
-@test round(objective_value(model); digits = 2) == 141.99
-
-model = construct_model("mcp124-2") do
-    MOCD.Optimizer(Mosek.Optimizer)
-end
-
-JuMP.optimize!(model)
-@test round(objective_value(model); digits = 2) == 269.88
-
-model = construct_model("mcp124-3") do
-    MOCD.Optimizer(Mosek.Optimizer)
-end
-
-JuMP.optimize!(model)
-@test round(objective_value(model); digits = 2) == 467.75
-
-model = construct_model("mcp124-4") do
-    MOCD.Optimizer(Mosek.Optimizer)
-end
-
-JuMP.optimize!(model)
-@test round(objective_value(model); digits = 2) == 864.41
