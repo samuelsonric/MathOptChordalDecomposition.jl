@@ -1,6 +1,7 @@
 # MathOptChordalDecomposition.jl
 
-[![Build Status](https://github.com/samuelsonric/MathOptChordalDecomposition.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuelsonric/MathOptChordalDecomposition.jl/actions?query=workflow%3ACI)
+[![CI](https://github.com/samuelsonric/MathOptChordalDecomposition.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelsonric/MathOptChordalDecomposition.jl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/samuelsonric/MathOptChordalDecomposition.jl/graph/badge.svg?token=z67ISx3vkD)](https://codecov.io/gh/samuelsonric/MathOptChordalDecomposition.jl)
 
 MathOptChordalDecomposition.jl is a [MathOptInterface.jl](https://github.com/jump-dev/MathOptInterface.jl)
 layer that implements chordal decomposition of sparse semidefinite constraints.
