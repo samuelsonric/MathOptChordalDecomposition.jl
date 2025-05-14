@@ -4,16 +4,21 @@ using Base: oneto
 using CliqueTrees
 using CliqueTrees: EliminationAlgorithm
 using LinearAlgebra
+using Graphs
 using SparseArrays
 
 import MathOptInterface as MOI
 
 struct Decomposition
     neqns::Int
-    values::Vector{Int}
-    cliques::SparseMatrixCSC{Bool, Int}
+    value::Vector{Int}
+    label::Vector{Int}
+    tree::CliqueTree{Int, Int}
 end
 
+"""
+    Optimizer(inner; alg::EliminationAlgorithm=MF())
+"""
 mutable struct Optimizer{A <: EliminationAlgorithm} <: MOI.AbstractOptimizer
     inner::MOI.AbstractOptimizer
     outer_to_inner::Dict{Int, Decomposition}
@@ -91,7 +96,9 @@ function MOI.get(model::Optimizer, attr::_ATTRIBUTES, arg::Vector{T}) where {T}
     return MOI.get.(model, attr, arg)
 end
 
-### AbstractOptimizerAttribute
+# -------------------------- #
+# AbstractOptimizerAttribute #
+# -------------------------- #
 
 function MOI.supports(model::Optimizer, arg::MOI.AbstractOptimizerAttribute)
     return MOI.supports(model.inner, arg)
@@ -106,13 +113,17 @@ function MOI.get(model::Optimizer, attr::MOI.AbstractOptimizerAttribute)
     return MOI.get(model.inner, attr)
 end
 
-### AbstractModelAttribute
+# ---------------------- #
+# AbstractModelAttribute #
+# ---------------------- #
 
 function MOI.supports(model::Optimizer, arg::MOI.AbstractModelAttribute)
     return MOI.supports(model.inner, arg)
 end
 
-### AbstractVariableAttribute
+# ------------------------- #
+# AbstractVariableAttribute #
+# ------------------------- #
 
 function MOI.is_valid(model::Optimizer, x::MOI.VariableIndex)
     return MOI.is_valid(model.inner, x)
@@ -145,7 +156,9 @@ function MOI.set(
     return
 end
 
-### AbstractConstraintAttribute
+# --------------------------- #
+# AbstractConstraintAttribute #
+# --------------------------- #
 
 function MOI.is_valid(model::Optimizer, ci::MOI.ConstraintIndex)
     return MOI.is_valid(model.inner, ci)
@@ -198,7 +211,9 @@ function MOI.add_constraint(
     return MOI.add_constraint(model.inner, f, s)
 end
 
-# Decomposition
+#################
+# Decomposition #
+#################
 
 function MOI.add_constraint(
         model::Optimizer,
@@ -214,32 +229,23 @@ function MOI.add_constraint(
     # compute tree decomposition
     label, tree = cliquetree(pattern; alg = model.alg)
 
-    # compute cliques
-    cliques = spzeros(Bool, n, length(tree))
-
-    for (b, bag) in enumerate(tree)
-        append!(cliques.rowval, bag)
-        cliques.colptr[b + 1] = cliques.colptr[b] + length(bag)
-    end    
-
-    resize!(cliques.nzval, length(cliques.rowval))
-    permute!(cliques, invperm(label), axes(cliques, 2))
-
     # terms
-    indices = Int[]
+    value = Int[]
     terms = MOI.VectorAffineTerm{T}[]
 
-    for b in axes(cliques, 2)
-        clique = view(cliques.rowval, nzrange(cliques, b)); m = length(clique)
+    for bag in tree
+        m = length(bag)
         U = MOI.add_variables(model, m * (m + 1) ÷ 2)
 
         for j in oneto(m), i in oneto(j)
             v = U[idx(i, j)]
-            push!(terms, MOI.VectorAffineTerm(idx(clique[i], clique[j]), MOI.ScalarAffineTerm(-1.0, v)))
+            ii = label[bag[i]]
+            jj = label[bag[j]]
+            push!(terms, MOI.VectorAffineTerm(idx(ii, jj), MOI.ScalarAffineTerm(-1.0, v)))
         end
 
         index = MOI.add_constraint(model.inner, MOI.VectorOfVariables(U), MOI.PositiveSemidefiniteConeTriangle(m))
-        push!(indices, index.value)
+        push!(value, index.value)
     end
 
     for (v, a) in zip(V, A), j in axes(a, 2)
@@ -263,9 +269,9 @@ function MOI.add_constraint(
         end
     end
 
-    value = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2)).value
-    model.outer_to_inner[value] = Decomposition(n, indices, cliques)
-    return MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(value)
+    i = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2)).value
+    model.outer_to_inner[i] = Decomposition(n, value, label, tree)
+    return MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(i)
 end
 
 function MOI.get(
@@ -302,25 +308,24 @@ function MOI.get(
 
     decomposition = model.outer_to_inner[index.value]
     neqns = decomposition.neqns
-    values = decomposition.values
-    cliques = decomposition.cliques
+    value = decomposition.value
+    label = decomposition.label
+    tree = decomposition.tree
     result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
 
-    for b in axes(cliques, 2)
-        clique = view(cliques.rowval, nzrange(cliques, b))
-        value = values[b]
+    for (k, bag) in zip(value, tree)
+        m = length(bag)
 
         part = MOI.get(
             model.inner,
             attribute,
-            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value),
+            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(k),
         )
 
-        for (j, w) in enumerate(clique)
-            for (i, v) in enumerate(clique)
-                i > j && break
-                result[idx(v, w)] += part[idx(i, j)]
-            end
+        for j in oneto(m), i in oneto(j)
+            ii = label[bag[i]]
+            jj = label[bag[j]]
+            result[idx(ii, jj)] += part[idx(i, j)]
         end
     end
 
@@ -335,34 +340,45 @@ function MOI.get(
         F <: MOI.VectorAffineFunction{Float64},
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
+
     decomposition = model.outer_to_inner[index.value]
     neqns = decomposition.neqns
-    values = decomposition.values
-    cliques = decomposition.cliques
+    value = decomposition.value
+    label = decomposition.label
+    tree = decomposition.tree
     result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
+    W = zeros(Float64, neqns, neqns)
 
-    for b in axes(cliques, 2)
-        clique = view(cliques.rowval, nzrange(cliques, b))
-        value = values[b]
+    for (k, bag) in zip(value, tree)
+        m = length(bag)
 
         part = MOI.get(
             model.inner,
             attribute,
-            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(value),
+            MOI.ConstraintIndex{MOI.VectorOfVariables, MOI.PositiveSemidefiniteConeTriangle}(k),
         )
 
-        for (j, w) in enumerate(clique)
-            for (i, v) in enumerate(clique)
-                i > j && break
-                result[idx(v, w)] = part[idx(i, j)]
-            end
+        for j in oneto(m), i in oneto(m)
+            ii = bag[i]
+            jj = bag[j]
+            W[ii, jj] = part[idx(i, j)]
         end
     end
 
+    complete!(W, tree)
+
+    for j in oneto(neqns), i in oneto(j)
+        ii = label[i]
+        jj = label[j]
+        result[idx(ii, jj)] = W[i, j]
+    end
+    
     return result
 end
 
-# Utilities
+# --------- #
+# Utilities #
+# --------- #
 
 # `(V, A, b) = decode(f, S)` satisfies
 #    f(Vᵢ) = Aᵢ + b
@@ -417,6 +433,35 @@ function decode(f::MOI.VectorAffineFunction{T}, S::MOI.PositiveSemidefiniteConeT
     return V, A, b
 end
 
+# Chordal Graphs and Semidefinite Optimization
+# Vandenberghe and Andersen
+# Algorithm 10.2: Positive semidefinite completion
+function complete!(W::Matrix, tree::CliqueTree)
+    n = nv(FilledGraph(tree))
+    η = sizehint!(Int[], n)
+    marker = zeros(Int, n)
+
+    for bag in reverse(eachindex(tree))
+        α = separator(tree, bag)
+        ν = residual(tree, bag)
+        marker[α] .= bag
+
+        for i in last(ν) + 1:n
+            marker[i] == bag || push!(η, i)
+        end
+
+        Wηα = @view W[η, α]
+        Wαα = @view W[α, α]
+        Wαν = @view W[α, ν]
+        Wην = Wηα * (qr(Wαα, ColumnNorm()) \ Wαν)
+        W[η, ν] = Wην
+        W[ν, η] = Wην'
+        empty!(η)
+    end
+
+    return W
+end
+
 # `S = sparsitypattern(A)` is a binary matrix with the same
 # sparsity pattern as A.
 function sparsitypattern(A::AbstractMatrix{T}) where {T}
@@ -429,7 +474,10 @@ end
 # idx ∘ (row, col) = id
 # (row, col) ∘ idx = id
 function idx(i::Int, j::Int)
-    @assert i <= j
+    if i > j
+        i, j = j, i
+    end    
+
     x = i + j * (j - 1) ÷ 2
     return x
 end
