@@ -271,14 +271,14 @@ function MOI.add_constraint(
 
     i = MOI.add_constraint(model.inner, MOI.VectorAffineFunction(terms, constants), MOI.Zeros(n * (n + 1) ÷ 2)).value
     model.outer_to_inner[i] = Decomposition(n, value, label, tree)
-    return MOI.ConstraintIndex{MOI.VectorAffineFunction{Float64}, MOI.PositiveSemidefiniteConeTriangle}(i)
+    return MOI.ConstraintIndex{MOI.VectorAffineFunction{T}, MOI.PositiveSemidefiniteConeTriangle}(i)
 end
 
 function MOI.get(
         model::Optimizer,
         ::MOI.NumberOfConstraints{F, S},
     ) where {
-        F <: MOI.VectorAffineFunction{Float64},
+        F <: MOI.VectorAffineFunction,
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
     return length(model.outer_to_inner)
@@ -288,7 +288,7 @@ function MOI.get(
         model::Optimizer,
         ::MOI.ListOfConstraintIndices{F, S},
     ) where {
-        F <: MOI.VectorAffineFunction{Float64},
+        F <: MOI.VectorAffineFunction,
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
 
@@ -302,7 +302,8 @@ function MOI.get(
         attribute::MOI.ConstraintPrimal,
         index::MOI.ConstraintIndex{F, S},
     ) where {
-        F <: MOI.VectorAffineFunction{Float64},
+        T,
+        F <: MOI.VectorAffineFunction{T},
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
 
@@ -311,7 +312,7 @@ function MOI.get(
     value = decomposition.value
     label = decomposition.label
     tree = decomposition.tree
-    result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
+    result = zeros(T, neqns * (neqns + 1) ÷ 2)
 
     for (k, bag) in zip(value, tree)
         m = length(bag)
@@ -337,7 +338,8 @@ function MOI.get(
         attribute::MOI.ConstraintDual,
         index::MOI.ConstraintIndex{F, S},
     ) where {
-        F <: MOI.VectorAffineFunction{Float64},
+        T,
+        F <: MOI.VectorAffineFunction{T},
         S <: MOI.PositiveSemidefiniteConeTriangle,
     }
 
@@ -346,8 +348,8 @@ function MOI.get(
     value = decomposition.value
     label = decomposition.label
     tree = decomposition.tree
-    result = zeros(Float64, neqns * (neqns + 1) ÷ 2)
-    W = zeros(Float64, neqns, neqns)
+    result = zeros(T, neqns * (neqns + 1) ÷ 2)
+    W = zeros(T, neqns, neqns)
 
     for (k, bag) in zip(value, tree)
         m = length(bag)
@@ -372,7 +374,7 @@ function MOI.get(
         jj = label[j]
         result[idx(ii, jj)] = W[i, j]
     end
-    
+
     return result
 end
 
@@ -446,7 +448,7 @@ function complete!(W::Matrix, tree::CliqueTree)
         ν = residual(tree, bag)
         marker[α] .= bag
 
-        for i in last(ν) + 1:n
+        for i in (last(ν) + 1):n
             marker[i] == bag || push!(η, i)
         end
 
@@ -476,7 +478,7 @@ end
 function idx(i::Int, j::Int)
     if i > j
         i, j = j, i
-    end    
+    end
 
     x = i + j * (j - 1) ÷ 2
     return x
