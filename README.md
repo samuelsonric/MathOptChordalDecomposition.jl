@@ -27,8 +27,8 @@ julia> function construct_model(f, name::String)
            set_silent(model)
            @variable(model, x[1:m])
            @objective(model, Min, c' * x)
-           @constraint(model, con1,  Symmetric(-Matrix(F[1]) + sum(Matrix(F[k + 1]) .* x[k] for k in 1:m)) in JuMP.PSDCone())
-           return model
+           @constraint(model, con, Symmetric(-Matrix(F[1]) + sum(Matrix(F[k + 1]) .* x[k] for k in 1:m)) in JuMP.PSDCone())
+           return model, con
        end
 construct_model (generic function with 1 method)
 ```
@@ -36,7 +36,7 @@ construct_model (generic function with 1 method)
 Solve the problem using the [Mosek.jl](https://github.com/MOSEK/Mosek.jl) optimizer.
 
 ```julia-repl
-julia> model = construct_model(Mosek.Optimizer, "mcp124-1");
+julia> model, con = construct_model(Mosek.Optimizer, "mcp124-1");
 
 julia> @time JuMP.optimize!(model)
   6.005076 seconds (2.53 k allocations: 515.859 KiB)
@@ -48,7 +48,7 @@ julia> objective_value(model)
 Solve the problem using [Mosek.jl](https://github.com/MOSEK/Mosek.jl) and MathOptChordalDecomposition.jl.
 
 ```julia-repl
-julia> model = construct_model(() -> MOCD.Optimizer(Mosek.Optimizer), "mcp124-1");
+julia> model, con = construct_model(() -> MOCD.Optimizer(Mosek.Optimizer), "mcp124-1");
 
 julia> @time JuMP.optimize!(model)
   0.041175 seconds (230.72 k allocations: 11.800 MiB)

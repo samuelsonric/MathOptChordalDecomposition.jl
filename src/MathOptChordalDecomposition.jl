@@ -17,7 +17,17 @@ struct Decomposition
 end
 
 """
-    Optimizer(inner; alg::EliminationAlgorithm=MF())
+    Optimizer <: MOI.AbstractOptimizer
+
+    Optimizer(inner::MOI.AbstractOptimizer; alg::CliqueTrees.EliminationAlgorithm=MF())
+
+An optimizer that computes a chordal decomposition of each semidefinite constraint.
+The elimination algorithm `alg` is used to compute the decomposition, and the optimizer
+`inner` is used to solve the decomposed problem.
+
+### Parameters
+  - `inner`: inner optimizer
+  - `alg`: elimination algorithm
 """
 mutable struct Optimizer{A <: EliminationAlgorithm} <: MOI.AbstractOptimizer
     inner::MOI.AbstractOptimizer
