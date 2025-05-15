@@ -1,7 +1,7 @@
 name = "MathOptChordalDecomposition"
 uuid = "691ff971-50ce-4a2e-a182-eb537bf792c3"
-authors = ["Richard Samuelson <samuelson.rick@gmail.com>"]
-version = "0.1.0"
+authors = ["Richard Samuelson <rsamuelson@ufl.edu>"]
+version = "0.2.0"
 
 [deps]
 CliqueTrees = "60701a23-6482-424a-84db-faee86b9b1f8"

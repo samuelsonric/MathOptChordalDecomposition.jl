@@ -40,7 +40,7 @@ Change `SCS` for any other conic solver that supports semidefinite constraints.
 The `sdplib` directory contains four semidefinite programming problems from the
 [SDPLIB library](https://github.com/vsdp/SDPLIB).
 
-The function `construct_model`, defined below, reads one of the problems and
+The function `main`, defined below, reads one of the problems and
 constructs a [JuMP.jl](https://github.com/jump-dev/JuMP.jl) model.
 
 For this example, it is significantly faster to solve the problem with 
